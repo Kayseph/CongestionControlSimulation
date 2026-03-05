@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Congestion Control Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<style>
+/* ═══════════════════════════════════════════════════════
+   TOKENS
+═══════════════════════════════════════════════════════ */
+:root {
+  --bg:        #080c10;
+  --surface:   #0d1117;
+  --panel:     #111820;
+  --border:    #1e2a35;
+  --border2:   #243040;
+  --text:      #cdd9e5;
+  --dim:       #546e7a;
+  --accent:    #00d4ff;
+  --green:     #39ff8a;
+  --amber:     #ffaa00;
+  --red:       #ff4757;
+  --purple:    #bd93f9;
+  --c1: #00d4ff; --c2: #39ff8a; --c3: #ff6b6b;
+  --c4: #bd93f9; --c5: #ffaa00; --c6: #00ffcc;
+  --c7: #ff79c6; --c8: #8be9fd;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-head: 'Orbitron', monospace;
+}
+
+/* ═══════════════════════════════════════════════════════
+   RESET + BASE
+═══════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: var(--font-mono);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+}
+
+/* scanline overlay */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 999;
+}
+
+/* ═══════════════════════════════════════════════════════
+   LAYOUT
+═══════════════════════════════════════════════════════ */
+.app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ── TOPBAR ── */
+.topbar {
+  display: flex; align-items: center; gap: 20px;
+  padding: 0 24px;
+  height: 52px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.topbar-logo {
+  font-family: var(--font-head);
+  font-size: 13px; font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 2px;
+  text-shadow: 0 0 20px rgba(0,212,255,0.5);
+  white-space: nowrap;
+}
+.topbar-sub {
+  color: var(--dim); font-size: 10px; letter-spacing: 1px;
+}
+.topbar-right {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 20px;
+}
+.status-pill {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; letter-spacing: 1px;
+  color: var(--dim);
+}
+.status-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  transition: all .3s;
+}
+.status-dot.running {
+  background: var(--amber);
+  box-shadow: 0 0 8px var(--amber);
+  animation: pulse 0.8s infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+.run-count { font-size: 10px; color: var(--dim); letter-spacing: 1px; }
+
+/* ── MAIN ── */
+.main { display: flex; flex: 1; overflow: hidden; }
+
+/* ── SIDEBAR ── */
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.section {
+  padding: 0 14px 12px;
+}
+.section-title {
+  font-size: 9px; font-weight: 700;
+  letter-spacing: 2px; color: var(--dim);
+  padding: 14px 0 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+
+/* controls */
+.field-label {
+  font-size: 9px; color: var(--dim);
+  letter-spacing: 1px; margin-bottom: 4px;
+  margin-top: 10px;
+}
+.field-label:first-of-type { margin-top: 0; }
+
+select {
+  width: 100%; padding: 6px 8px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border2);
+  font-family: var(--font-mono); font-size: 11px;
+  outline: none; cursor: pointer;
+  transition: border-color .2s;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23546e7a'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 24px;
+}
+select:focus { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(0,212,255,.2); }
+
+/* buttons */
+.btn {
+  display: block; width: 100%;
+  padding: 8px 10px; margin-bottom: 6px;
+  font-family: var(--font-mono); font-size: 10px;
+  font-weight: 700; letter-spacing: 1.5px;
+  border: 1px solid; cursor: pointer;
+  background: transparent;
+  transition: all .15s;
+  text-align: left;
+  position: relative; overflow: hidden;
+}
+.btn::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: currentColor;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.btn:hover::after { opacity: 0.08; }
+.btn:active::after { opacity: 0.16; }
+
+.btn-run    { color: var(--accent);  border-color: rgba(0,212,255,.4); }
+.btn-auto   { color: var(--green);   border-color: rgba(57,255,138,.4); }
+.btn-auto.active { color: var(--red); border-color: rgba(255,71,87,.4); background: rgba(255,71,87,.05); }
+.btn-reset  { color: var(--dim);     border-color: rgba(84,110,122,.3); }
+.btn-export { color: var(--purple);  border-color: rgba(189,147,249,.4); }
+.btn-run:hover    { border-color: var(--accent);  box-shadow: 0 0 12px rgba(0,212,255,.2); }
+.btn-auto:hover   { border-color: var(--green);   box-shadow: 0 0 12px rgba(57,255,138,.2); }
+.btn-reset:hover  { border-color: var(--dim); }
+.btn-export:hover { border-color: var(--purple);  box-shadow: 0 0 12px rgba(189,147,249,.2); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* metric tiles */
+.metrics-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.metric-tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  transition: border-color .3s;
+}
+.metric-tile.alert-red   { border-color: rgba(255,71,87,.5); }
+.metric-tile.alert-amber { border-color: rgba(255,170,0,.5); }
+.metric-tile.alert-green { border-color: rgba(57,255,138,.3); }
+
+.metric-name  { font-size: 8px; color: var(--dim); letter-spacing: 1px; margin-bottom: 4px; }
+.metric-value { font-size: 16px; font-weight: 700; color: var(--text); line-height: 1; }
+.metric-value.c-accent { color: var(--accent); }
+.metric-value.c-red    { color: var(--red); }
+.metric-value.c-amber  { color: var(--amber); }
+.metric-value.c-green  { color: var(--green); }
+.metric-value.c-purple { color: var(--purple); }
+.metric-unit  { font-size: 8px; color: var(--dim); margin-top: 2px; }
+
+.metric-divider {
+  grid-column: 1/-1;
+  height: 1px; background: var(--border); margin: 4px 0;
+}
+
+/* sidebar footer */
+.sidebar-footer {
+  margin-top: auto;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  font-size: 9px; color: var(--border2);
+  letter-spacing: 1px;
+}
+
+/* ── CHART AREA ── */
+.charts-area {
+  flex: 1; display: flex; flex-direction: column;
+  overflow: hidden; background: var(--bg);
+  padding: 8px;
+  gap: 8px;
+}
+
+.chart-strip {
+  font-size: 9px; color: var(--dim);
+  letter-spacing: 2px; padding: 6px 4px 2px;
+  display: flex; align-items: center; gap: 10px;
+}
+.chart-strip::after {
+  content: ''; flex: 1; height: 1px; background: var(--border);
+}
+
+.charts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 8px; flex: 1; min-height: 0;
+}
+.chart-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  padding: 10px 12px 8px;
+  position: relative;
+  transition: border-color .3s;
+}
+.chart-card:hover { border-color: var(--border2); }
+
+.chart-card-title {
+  font-size: 9px; font-weight: 700;
+  letter-spacing: 2px; margin-bottom: 6px;
+}
+.chart-card-title.c-accent { color: var(--accent); }
+.chart-card-title.c-red    { color: var(--red); }
+.chart-card-title.c-amber  { color: var(--amber); }
+.chart-card-title.c-purple { color: var(--purple); }
+
+.chart-canvas-wrap { flex: 1; min-height: 0; position: relative; }
+
+/* ── RUNS TABLE ── */
+.table-area {
+  height: 160px; flex-shrink: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  overflow: hidden; display: flex; flex-direction: column;
+}
+.table-header-row {
+  display: flex; align-items: center;
+  padding: 6px 12px; border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+.table-header-row span {
+  font-size: 9px; color: var(--dim); letter-spacing: 1.5px;
+}
+.table-scroll { overflow-y: auto; flex: 1; }
+
+table { width: 100%; border-collapse: collapse; font-size: 10px; }
+thead th {
+  padding: 5px 10px; text-align: left;
+  color: var(--dim); font-size: 9px; font-weight: 500;
+  letter-spacing: 1px; white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--panel);
+}
+tbody tr { border-bottom: 1px solid rgba(30,42,53,.6); transition: background .12s; }
+tbody tr:hover { background: rgba(255,255,255,.02); }
+tbody td {
+  padding: 5px 10px; white-space: nowrap;
+  font-size: 10px; color: var(--text);
+}
+td.mono { font-family: var(--font-mono); }
+td.c-accent { color: var(--accent); }
+td.c-red    { color: var(--red); }
+td.c-amber  { color: var(--amber); }
+td.c-green  { color: var(--green); }
+td.c-purple { color: var(--purple); }
+td.c-dim    { color: var(--dim); }
+
+/* ── TOAST ── */
+.toast {
+  position: fixed; bottom: 24px; right: 24px;
+  padding: 10px 18px;
+  background: var(--panel); border: 1px solid var(--border2);
+  font-size: 11px; color: var(--text);
+  opacity: 0; transform: translateY(10px);
+  transition: all .25s;
+  pointer-events: none; z-index: 1000;
+  box-shadow: 0 4px 24px rgba(0,0,0,.5);
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.error { border-color: rgba(255,71,87,.5); color: var(--red); }
+
+/* scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+/* animations */
+@keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+.fade-in { animation: fadeIn .25s ease forwards; }
+
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ══ TOPBAR ══════════════════════════════════════════════════ -->
+  <div class="topbar">
+    <div class="topbar-logo">▣ CONGESTION SIM</div>
+    <div class="topbar-sub">TCP · AQM · NETWORK ANALYSIS</div>
+    <div class="topbar-right">
+      <div class="run-count" id="runCount">0 RUNS LOGGED</div>
+      <div class="status-pill">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">IDLE</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ BODY ════════════════════════════════════════════════════ -->
+  <div class="main">
+
+    <!-- ── SIDEBAR ─────────────────────────────────────────────── -->
+    <div class="sidebar">
+
+      <!-- CONFIGURATION -->
+      <div class="section">
+        <div class="section-title">CONFIGURATION</div>
+
+        <div class="field-label">AQM ALGORITHM</div>
+        <select id="selAqm">
+          <option>RED</option><option>ARED</option>
+          <option>NLRED</option><option>DropTail</option>
+        </select>
+
+        <div class="field-label">SENDER TYPE</div>
+        <select id="selSender">
+          <option>RENO</option><option>BBR</option>
+        </select>
+
+        <div class="field-label">FLOW COUNT</div>
+        <select id="selFlows">
+          <option>2</option><option selected>4</option>
+          <option>6</option><option>8</option>
+        </select>
+      </div>
+
+      <!-- CONTROLS -->
+      <div class="section">
+        <div class="section-title">CONTROLS</div>
+        <button class="btn btn-run"    id="btnRun"    onclick="runSim()">▶  RUN SIMULATION</button>
+        <button class="btn btn-auto"   id="btnAuto"   onclick="toggleAuto()">▶▶ START AUTO RUN</button>
+        <button class="btn btn-reset"  id="btnReset"  onclick="resetAll()">↺  RESET ALL RUNS</button>
+        <button class="btn btn-export" id="btnExport" onclick="exportReport()">⬇  EXPORT XLSX REPORT</button>
+      </div>
+
+      <!-- LAST RUN METRICS -->
+      <div class="section">
+        <div class="section-title">LAST RUN — METRICS</div>
+        <div class="metrics-grid">
+
+          <div class="metric-tile" id="tile-tput">
+            <div class="metric-name">THROUGHPUT</div>
+            <div class="metric-value c-accent" id="m-tput">—</div>
+            <div class="metric-unit">pkt/s</div>
+          </div>
+
+          <div class="metric-tile" id="tile-loss">
+            <div class="metric-name">LOSS RATE</div>
+            <div class="metric-value" id="m-loss">—</div>
+            <div class="metric-unit">ratio</div>
+          </div>
+
+          <div class="metric-tile" id="tile-queue">
+            <div class="metric-name">AVG QUEUE</div>
+            <div class="metric-value" id="m-queue">—</div>
+            <div class="metric-unit">packets</div>
+          </div>
+
+          <div class="metric-tile" id="tile-delay">
+            <div class="metric-name">AVG DELAY</div>
+            <div class="metric-value" id="m-delay">—</div>
+            <div class="metric-unit">seconds</div>
+          </div>
+
+          <div class="metric-divider"></div>
+
+          <div class="metric-tile" id="tile-fair">
+            <div class="metric-name">FAIRNESS</div>
+            <div class="metric-value" id="m-fair">—</div>
+            <div class="metric-unit">jain index</div>
+          </div>
+
+          <div class="metric-tile" id="tile-aqmd">
+            <div class="metric-name">AQM DROPS</div>
+            <div class="metric-value" id="m-aqmd">—</div>
+            <div class="metric-unit">packets</div>
+          </div>
+
+          <div class="metric-tile" id="tile-bufd">
+            <div class="metric-name">BUF DROPS</div>
+            <div class="metric-value" id="m-bufd">—</div>
+            <div class="metric-unit">packets</div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="sidebar-footer">v2.0 · CongestionSim · Flask+JS</div>
+    </div>
+
+    <!-- ── CHART AREA ───────────────────────────────────────────── -->
+    <div class="charts-area">
+
+      <div class="chart-strip">REAL-TIME SIMULATION CHARTS</div>
+
+      <div class="charts-grid">
+        <div class="chart-card">
+          <div class="chart-card-title c-accent">THROUGHPUT  (pkt/s)</div>
+          <div class="chart-canvas-wrap"><canvas id="cTput"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-title c-red">LOSS  RATIO</div>
+          <div class="chart-canvas-wrap"><canvas id="cLoss"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-title c-amber">QUEUE  LENGTH  (pkts)</div>
+          <div class="chart-canvas-wrap"><canvas id="cQueue"></canvas></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-title c-purple">QUEUE  DELAY  (s)</div>
+          <div class="chart-canvas-wrap"><canvas id="cDelay"></canvas></div>
+        </div>
+      </div>
+
+      <!-- RUNS TABLE -->
+      <div class="table-area">
+        <div class="table-header-row">
+          <span>RUN LOG</span>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th><th>TIME</th><th>AQM</th><th>SENDER</th>
+                <th>FLOWS</th><th>THROUGHPUT</th><th>LOSS</th>
+                <th>AVG Q</th><th>DELAY</th><th>FAIRNESS</th>
+                <th>AQM DROPS</th><th>BUF DROPS</th>
+              </tr>
+            </thead>
+            <tbody id="runsBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════
+   CHART COLOURS
+═══════════════════════════════════════════════════════ */
+const COLORS = [
+  '#00d4ff','#39ff8a','#ff6b6b','#bd93f9',
+  '#ffaa00','#00ffcc','#ff79c6','#8be9fd'
+];
+
+const CHART_DEFAULTS = {
+  responsive: true, maintainAspectRatio: false,
+  animation: { duration: 400 },
+  interaction: { mode: 'index', intersect: false },
+  plugins: {
+    legend: {
+      display: true,
+      position: 'top',
+      labels: {
+        color: '#546e7a', font: { family: 'JetBrains Mono', size: 9 },
+        boxWidth: 10, padding: 8
+      }
+    },
+    tooltip: {
+      backgroundColor: '#111820',
+      borderColor: '#1e2a35', borderWidth: 1,
+      titleColor: '#cdd9e5', bodyColor: '#8b949e',
+      titleFont: { family: 'JetBrains Mono', size: 10 },
+      bodyFont:  { family: 'JetBrains Mono', size: 10 },
+    }
+  },
+  scales: {
+    x: {
+      ticks: { color:'#546e7a', font:{family:'JetBrains Mono',size:8}, maxTicksLimit:8 },
+      grid:  { color:'rgba(30,42,53,0.8)' },
+      border:{ color:'#1e2a35' }
+    },
+    y: {
+      ticks: { color:'#546e7a', font:{family:'JetBrains Mono',size:8}, maxTicksLimit:6 },
+      grid:  { color:'rgba(30,42,53,0.8)' },
+      border:{ color:'#1e2a35' }
+    }
+  }
+};
+
+function mkChart(id) {
+  const ctx = document.getElementById(id).getContext('2d');
+  return new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [] },
+    options: JSON.parse(JSON.stringify(CHART_DEFAULTS))
+  });
+}
+
+const charts = {
+  tput:  mkChart('cTput'),
+  loss:  mkChart('cLoss'),
+  queue: mkChart('cQueue'),
+  delay: mkChart('cDelay'),
+};
+
+/* ═══════════════════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════════════════ */
+let runs      = [];
+let autoRun   = false;
+let autoTimer = null;
+let runIdx    = 0;
+
+/* ═══════════════════════════════════════════════════════
+   SIMULATION
+═══════════════════════════════════════════════════════ */
+async function runSim() {
+  setStatus('running');
+  disableControls(true);
+
+  const aqm    = document.getElementById('selAqm').value;
+  const sender = document.getElementById('selSender').value;
+  const flows  = document.getElementById('selFlows').value;
+
+  try {
+    const res  = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ aqm, sender, flows: parseInt(flows) })
+    });
+    const data = await res.json();
+    runs.push(data);
+    runIdx++;
+
+    updateMetrics(data);
+    addChartSeries(data, runIdx - 1);
+    addTableRow(data);
+    updateRunCount();
+    toast(`Run ${data.run_id} complete — ${aqm}/${sender}/${flows} flows`);
+  } catch(e) {
+    toast('Simulation failed: ' + e.message, true);
+  }
+
+  setStatus('idle');
+  disableControls(false);
+
+  if (autoRun) {
+    autoTimer = setTimeout(runSim, 2000);
+  }
+}
+
+function toggleAuto() {
+  autoRun = !autoRun;
+  const btn = document.getElementById('btnAuto');
+  if (autoRun) {
+    btn.textContent = '◼  STOP AUTO RUN';
+    btn.classList.add('active');
+    runSim();
+  } else {
+    btn.textContent = '▶▶ START AUTO RUN';
+    btn.classList.remove('active');
+    clearTimeout(autoTimer);
+    setStatus('idle');
+    disableControls(false);
+  }
+}
+
+async function resetAll() {
+  clearTimeout(autoTimer);
+  autoRun = false;
+  document.getElementById('btnAuto').textContent = '▶▶ START AUTO RUN';
+  document.getElementById('btnAuto').classList.remove('active');
+
+  await fetch('/api/reset', { method: 'POST' });
+
+  runs = []; runIdx = 0;
+  Object.values(charts).forEach(c => { c.data.datasets = []; c.data.labels = []; c.update(); });
+  document.getElementById('runsBody').innerHTML = '';
+  updateRunCount();
+
+  const ids = ['m-tput','m-loss','m-queue','m-delay','m-fair','m-aqmd','m-bufd'];
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    el.textContent = '—';
+    el.className = 'metric-value';
+  });
+  ['tile-tput','tile-loss','tile-queue','tile-delay','tile-fair','tile-aqmd','tile-bufd']
+    .forEach(id => document.getElementById(id).className = 'metric-tile');
+
+  toast('All runs cleared');
+}
+
+async function exportReport() {
+  if (!runs.length) { toast('No runs to export', true); return; }
+  const btn = document.getElementById('btnExport');
+  btn.disabled = true; btn.textContent = '  GENERATING…';
+  try {
+    const res  = await fetch('/api/export', { method: 'POST' });
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    a.download = `SimulationReport_${Date.now()}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Report downloaded');
+  } catch(e) {
+    toast('Export failed: ' + e.message, true);
+  }
+  btn.disabled = false; btn.textContent = '⬇  EXPORT XLSX REPORT';
+}
+
+/* ═══════════════════════════════════════════════════════
+   UI UPDATES
+═══════════════════════════════════════════════════════ */
+function updateMetrics(d) {
+  // throughput
+  set('m-tput', d.throughput.toFixed(1), 'c-accent');
+  document.getElementById('tile-tput').className = 'metric-tile alert-green';
+
+  // loss
+  const lossHigh = d.loss_rate > 0.05;
+  set('m-loss', d.loss_rate.toFixed(4), lossHigh ? 'c-red' : 'c-green');
+  document.getElementById('tile-loss').className = 'metric-tile ' + (lossHigh ? 'alert-red' : 'alert-green');
+
+  // queue
+  const qHigh = d.avg_queue > 40;
+  set('m-queue', d.avg_queue.toFixed(1), qHigh ? 'c-amber' : '');
+  document.getElementById('tile-queue').className = 'metric-tile ' + (qHigh ? 'alert-amber' : '');
+
+  // delay
+  const dHigh = d.avg_delay > 0.1;
+  set('m-delay', d.avg_delay.toFixed(4), dHigh ? 'c-amber' : '');
+  document.getElementById('tile-delay').className = 'metric-tile ' + (dHigh ? 'alert-amber' : '');
+
+  // fairness
+  const fGood = d.fairness > 0.9;
+  set('m-fair', d.fairness.toFixed(4), fGood ? 'c-green' : 'c-amber');
+  document.getElementById('tile-fair').className = 'metric-tile ' + (fGood ? 'alert-green' : 'alert-amber');
+
+  // aqm drops
+  const ad = d.total_aqm_drops || 0;
+  set('m-aqmd', ad.toLocaleString(), ad > 0 ? 'c-amber' : '');
+  document.getElementById('tile-aqmd').className = 'metric-tile ' + (ad > 0 ? 'alert-amber' : '');
+
+  // buf drops
+  const bd = d.total_buf_drops || 0;
+  set('m-bufd', bd.toLocaleString(), bd > 0 ? 'c-red' : '');
+  document.getElementById('tile-bufd').className = 'metric-tile ' + (bd > 0 ? 'alert-red' : '');
+}
+
+function set(id, val, cls) {
+  const el = document.getElementById(id);
+  el.textContent = val;
+  el.className = 'metric-value' + (cls ? ' ' + cls : '');
+}
+
+function addChartSeries(d, idx) {
+  const color  = COLORS[idx % COLORS.length];
+  const label  = `R${d.run_id} ${d.aqm}/${d.sender}`;
+  const ts     = d.time_series;
+  const labels = ts.time;
+
+  const ds = (key, chart) => ({
+    label, data: ts[key],
+    borderColor: color, backgroundColor: color + '18',
+    borderWidth: 1.5, pointRadius: 0,
+    fill: true, tension: 0.3
+  });
+
+  // Use first run's labels for x-axis (all runs same length)
+  if (idx === 0) {
+    Object.values(charts).forEach(c => { c.data.labels = labels; });
+  }
+
+  charts.tput.data.datasets.push(ds('throughput'));
+  charts.loss.data.datasets.push(ds('loss'));
+  charts.queue.data.datasets.push(ds('queue'));
+  charts.delay.data.datasets.push(ds('delay'));
+
+  Object.values(charts).forEach(c => c.update());
+}
+
+function addTableRow(d) {
+  const tbody = document.getElementById('runsBody');
+  const tr    = document.createElement('tr');
+  tr.classList.add('fade-in');
+
+  const lossClass = d.loss_rate > 0.05 ? 'c-red' : 'c-green';
+  const fairClass = d.fairness  > 0.9  ? 'c-green' : 'c-amber';
+  const aqmdClass = d.total_aqm_drops > 0 ? 'c-amber' : 'c-dim';
+  const bufdClass = d.total_buf_drops > 0 ? 'c-red'   : 'c-dim';
+
+  tr.innerHTML = `
+    <td class="c-accent">${d.run_id}</td>
+    <td class="c-dim">${d.timestamp.split(' ')[1]}</td>
+    <td>${d.aqm}</td>
+    <td>${d.sender}</td>
+    <td class="c-dim">${d.flows}</td>
+    <td class="c-accent">${d.throughput.toFixed(1)}</td>
+    <td class="${lossClass}">${d.loss_rate.toFixed(4)}</td>
+    <td>${d.avg_queue.toFixed(1)}</td>
+    <td>${d.avg_delay.toFixed(4)}</td>
+    <td class="${fairClass}">${d.fairness.toFixed(4)}</td>
+    <td class="${aqmdClass}">${(d.total_aqm_drops||0).toLocaleString()}</td>
+    <td class="${bufdClass}">${(d.total_buf_drops||0).toLocaleString()}</td>
+  `;
+  tbody.prepend(tr);
+}
+
+function updateRunCount() {
+  document.getElementById('runCount').textContent =
+    `${runs.length} RUN${runs.length !== 1 ? 'S' : ''} LOGGED`;
+}
+
+/* ═══════════════════════════════════════════════════════
+   HELPERS
+═══════════════════════════════════════════════════════ */
+function setStatus(state) {
+  const dot  = document.getElementById('statusDot');
+  const text = document.getElementById('statusText');
+  if (state === 'running') {
+    dot.classList.add('running');
+    text.textContent = 'RUNNING';
+    text.style.color = 'var(--amber)';
+  } else {
+    dot.classList.remove('running');
+    text.textContent = 'IDLE';
+    text.style.color = 'var(--dim)';
+  }
+}
+
+function disableControls(dis) {
+  ['btnRun','btnReset','btnExport'].forEach(id =>
+    document.getElementById(id).disabled = dis);
+}
+
+let toastTimer;
+function toast(msg, isError = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className   = 'toast show' + (isError ? ' error' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+}
+</script>
+</body>
+</html>
